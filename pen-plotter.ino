@@ -26,8 +26,7 @@
 #define X_SERVO_PIN A7
 #define Z_SERVO_PIN A0
 
-#define LED_BUSY D6
-#define LED_IDLE D7
+#define LED_BUSY D7
 
 Stepper _stepper_Y(20, Y_STEPPER_A1_PIN, Y_STEPPER_A2_PIN, Y_STEPPER_B1_PIN, Y_STEPPER_B2_PIN);
 
@@ -114,8 +113,7 @@ int adjust_pen(String direction) {
 
 /* derived from https://github.com/MarginallyClever/pen-plotter/blob/master/pen-plotter2Axis/pen-plotter2Axis.ino */
 void draw_line(int X, int Y) {
-    digitalWrite(LED_BUSY, LOW);
-    digitalWrite(LED_IDLE, HIGH);
+    digitalWrite(LED_BUSY, HIGH);
     
     Serial.println("X");
     Serial.println(Y);
@@ -160,8 +158,7 @@ void draw_line(int X, int Y) {
         }
     }
     
-    digitalWrite(LED_BUSY, HIGH);
-    digitalWrite(LED_IDLE, LOW);
+    digitalWrite(LED_BUSY, LOW);
 }
 
 void draw_arc(float cx,float cy,float x,float y,float dir) {
@@ -337,9 +334,7 @@ void setup() {
     pinMode(Z_SERVO_PIN, OUTPUT);
 
     pinMode(LED_BUSY, OUTPUT);
-    pinMode(LED_IDLE, OUTPUT);
-    digitalWrite(LED_BUSY, HIGH);
-    digitalWrite(LED_IDLE, LOW);
+    digitalWrite(LED_BUSY, LOW);
 
     _stepper_Y.setSpeed(100);
 
