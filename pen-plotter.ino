@@ -1,26 +1,35 @@
 
-/* Pen cnc plotter control code
+/* Pen cnc plotter control code for Particle.io Core
  * (C) depletionmode <David Kaplan>, 2016
  *
  * Licensed under the GPLv3 (see text at EOF)
  *
- * Compiles for Particle (nee Spark) Core FW v0.3.4
- *
- * Some code derived from https://github.com/MarginallyClever/GcodeCNCDemo used under GPLv3 - thanks!
+ * Some code derived from https://github.com/MarginallyClever/pen-plotter used under GPLv3 - thanks!
  * Inspired by http://www.ardumotive.com/new-cnc-plotter.html - thanks!
  */
+ 
+//SYSTEM_MODE(SEMI_AUTOMATIC);
 
-#include "Stepper/Stepper.h"
+#include "Stepper.h"
 
-#define Z_STEPS_PER_POINT 20
-#define Y_STEPS_PER_POINT 20
-#define X_ROTATIONS_PER_POINT 20
-#define X_DUTY_CYCLE 0.20
-#define X_MAX 40
-#define Y_MAX 40
+#define X_LENGTH_PTS 105
+#define Y_LENGTH_PTS 105
 
-Stepper _stepper_Z(20, D0, D1, D2, D3);
-Stepper _stepper_Y(20, D4, D5, D6, D7);
+#define Y_STEPS_PER_POINT 2
+#define X_MS_PER_POINT 6
+
+#define Y_STEPPER_A1_PIN A2
+#define Y_STEPPER_A2_PIN A4
+#define Y_STEPPER_B1_PIN A1
+#define Y_STEPPER_B2_PIN A5
+
+#define X_SERVO_PIN A7
+#define Z_SERVO_PIN A0
+
+#define LED_BUSY D6
+#define LED_IDLE D7
+
+Stepper _stepper_Y(20, Y_STEPPER_A1_PIN, Y_STEPPER_A2_PIN, Y_STEPPER_B1_PIN, Y_STEPPER_B2_PIN);
 
 int _current_coord_X;
 int _current_coord_Y;
@@ -33,63 +42,91 @@ void X_move(int pts) {
     if (_current_coord_X + pts < 0) {
         // move to 0
         pts = _current_coord_X * -1;
-    } else if (_current_coord_X + pts > X_MAX -1)  {
-        // move to X_MAX
-        pts = X_MAX - _current_coord_X;
+    } else if (_current_coord_X + pts > X_LENGTH_PTS -1)  {
+        // move to X_LENGTH_PTS
+        pts = X_LENGTH_PTS - _current_coord_X;
     }
     
     _current_coord_X += pts;
     
-    // X-axis is driven by a DC motor and rotary encoder
     int fwd = pts > 0 ? 1 : 0;
     if (!fwd) pts *= -1;    // abs(pts)
-    while (pts--) {
-        // run motor, counting rotations until a single point moved
-        // todo - pwm
-        analogWrite(fwd ? A0 : A1, (int)(X_DUTY_CYCLE / 256.0));
-        int i = X_ROTATIONS_PER_POINT;
-        while (i) {
-            if (digitalRead(A2) != _current_rotary_probe) {
-                _current_rotary_probe ^= 1;
-                i--;
-            }
-        }
-        analogWrite(fwd ? A0 : A1, 0);
-    }
+    analogWrite(X_SERVO_PIN, fwd ? 250 : 10);
+    delay(X_MS_PER_POINT*pts * (fwd ? 0.9 : 0.875));
+    analogWrite(X_SERVO_PIN, 0);
+    //Serial.println(X_MS_PER_POINT*pts);
 }
 
 void Y_move(int pts) {
     if (_current_coord_Y + pts < 0) {
         // move to 0
         pts = _current_coord_Y * -1;
-    } else if (_current_coord_Y + pts > Y_MAX -1)  {
-        // move to Y_MAX
-        pts = Y_MAX - _current_coord_Y;
+    } else if (_current_coord_Y + pts > Y_LENGTH_PTS -1)  {
+        // move to Y_LENGTH_PTS
+        pts = Y_LENGTH_PTS - _current_coord_Y;
     }
     
     _current_coord_Y += pts;
     
-    _stepper_Y.step(pts);
+    _stepper_Y.step(pts*Y_STEPS_PER_POINT);
 }
 
 void Z_up() {
-    _stepper_Z.step(-10);
+    analogWrite(Z_SERVO_PIN, 50);
+    delay(40);
+    analogWrite(Z_SERVO_PIN, 0);
 }
 
 void Z_down() {
-    _stepper_Z.step(10);
+    analogWrite(Z_SERVO_PIN, 250);
+    delay(38);
+    analogWrite(Z_SERVO_PIN, 0);
 }
 
+int adjust_axis(String axis) {
+    if (axis == "X") {
+        analogWrite(X_SERVO_PIN, 10);
+        delay(X_MS_PER_POINT*5);
+        analogWrite(X_SERVO_PIN, 0);
+    } else if (axis == "reset") {
+        draw_line(0, 0);
+    } else {
+        _stepper_Y.step(-1*Y_STEPS_PER_POINT*5);
+    }
+    
+    return axis == "X" ? 0 : 1;
+}
+
+
 int adjust_pen(String direction) {
-    _stepper_Z.step(direction == "down" ? 1 : -1);
+    if (direction == "down") {
+        analogWrite(Z_SERVO_PIN, 250);
+        delay(7);
+        analogWrite(Z_SERVO_PIN, 0);
+    } else {
+        analogWrite(Z_SERVO_PIN, 50);
+        delay(7);
+        analogWrite(Z_SERVO_PIN, 0);
+    }
     
     return direction == "down" ? 0 : 1;
 }
 
-/* derived from https://github.com/MarginallyClever/GcodeCNCDemo/blob/master/GcodeCNCDemo2Axis/GcodeCNCDemo2Axis.ino */
+/* derived from https://github.com/MarginallyClever/pen-plotter/blob/master/pen-plotter2Axis/pen-plotter2Axis.ino */
 void draw_line(int X, int Y) {
+    digitalWrite(LED_BUSY, LOW);
+    digitalWrite(LED_IDLE, HIGH);
+    
+    Serial.println("X");
+    Serial.println(Y);
+    Serial.println("Y");
+    Serial.println(X);
+    // convert mm to pts
+    /*X *= PTS_PER_MM;
+    Y *= PTS_PER_MM;*/
+    
     int dx = X - _current_coord_X;
-    int dy = Y - _current_coord_X;
+    int dy = Y - _current_coord_Y;
   
     int dirx = dx > 0 ? 1 : -1;
     int diry = dy > 0 ? 1 : -1; 
@@ -122,22 +159,53 @@ void draw_line(int X, int Y) {
             delay(100);
         }
     }
+    
+    digitalWrite(LED_BUSY, HIGH);
+    digitalWrite(LED_IDLE, LOW);
+}
+
+void draw_arc(float cx,float cy,float x,float y,float dir) {
+	// todo
 }
 
 int parse_gcode(String gcode) {
+    int cnt = 0;
+    
+    // tokenize
+    while (gcode.length() > 0) {
+        cnt++;
+        
+        int delim_at = gcode.indexOf("\n");
+        if (delim_at >= 0) {
+            parse_gcode_line(gcode.substring(0, delim_at));
+            gcode = gcode.substring(delim_at + 1);
+        } else {
+            // final command may not be '\n' terminated
+            parse_gcode_line(gcode);
+            break;
+        }
+    }
+    
+    return cnt;
+}
+
+
+int parse_gcode_line(String gcode) {
+    Serial.print(gcode + "\n");
+    
     // hack to remove leading 0 in command to support 2-digit format
-    //gcode = gcode.toUpperCase().replace("G0", "G");
+    gcode = gcode.toUpperCase().replace("G0", "G");
     
     // pen up/down
     if (gcode.startsWith("M300")) {
         if (gcode.indexOf("S30") > -1)
             Z_down();
-        else if (gcode.startsWith("S50"))
+        else if (gcode.indexOf("S50") > -1)
             Z_up();
         return 300;
     }
     
-    // move
+    // move - line
     if (gcode.startsWith("G0") ||
         gcode.startsWith("G1")) {
             int x_str_pos = gcode.indexOf("X");
@@ -145,6 +213,38 @@ int parse_gcode(String gcode) {
             
             int X = _mode_absolute ? 0 : _current_coord_X;
             int Y = _mode_absolute ? 0 : _current_coord_Y;
+            
+            if (x_str_pos > 0) {
+                int ws_pos = gcode.indexOf(".", x_str_pos);
+                
+                X += gcode.substring(x_str_pos + 1, x_str_pos + ws_pos).toInt();
+            } else
+                X = _current_coord_X;
+            
+            if (y_str_pos > 0) {
+                int ws_pos = gcode.indexOf(".", y_str_pos);
+                
+                Y += gcode.substring(y_str_pos + 1, y_str_pos + ws_pos).toInt();
+            } else
+                Y = _current_coord_Y;
+            
+            draw_line(X, Y);
+            return 
+            1;
+    }
+    
+    // move - arc
+    if (gcode.startsWith("G2") ||
+        gcode.startsWith("G3")) {
+            int x_str_pos = gcode.indexOf("X");
+            int y_str_pos = gcode.indexOf("Y");
+            int i_str_pos = gcode.indexOf("I");
+            int j_str_pos = gcode.indexOf("J");
+            
+            int X = _mode_absolute ? 0 : _current_coord_X;
+            int Y = _mode_absolute ? 0 : _current_coord_Y;
+            int I = 0;
+            int J = 0;
             
             if (x_str_pos > 0) {
                 int ws_pos = gcode.indexOf(".", x_str_pos);
@@ -158,16 +258,38 @@ int parse_gcode(String gcode) {
                 Y += gcode.substring(y_str_pos + 1, y_str_pos + ws_pos).toInt();
             }
             
-            draw_line(X, Y);
+            if (i_str_pos > 0) {
+                int ws_pos = gcode.indexOf(".", i_str_pos);
+                
+                I += gcode.substring(i_str_pos + 1, i_str_pos + ws_pos).toInt();
+            }
+            
+            if (j_str_pos > 0) {
+                int ws_pos = gcode.indexOf(".", j_str_pos);
+                
+                J += gcode.substring(j_str_pos + 1, j_str_pos + ws_pos).toInt();
+            }
+            
+            draw_arc(I, J, X, Y, gcode.startsWith("G2") ? -1 : 1);
             return 1;
     }
     
-    // puase
+    // pause
     if (gcode.startsWith("G4")) {
         int val_pos = gcode.indexOf("P");
         int ws_pos = gcode.indexOf(" ", val_pos);
         delay(1000 * gcode.substring(val_pos + 1, val_pos + ws_pos).toInt());
         return 4;
+    }
+    
+    // move to origin
+    if (gcode.startsWith("G28")) {
+        Z_up();
+        
+        // todo - fix
+        draw_line(-1*_current_coord_X, -1*_current_coord_Y);
+        
+        return 28;
     }
     
     // set absolute mode
@@ -203,21 +325,27 @@ int parse_gcode(String gcode) {
     return -1;
 }
 
+int count;
 void setup() {
-    _current_coord_X = 0;
+    Serial.begin(9600);
+    Serial.print("CNC Plotter by depletionmode");
+
     _current_coord_Y = 0;
-    _mode_absolute = 0;
-    
-    pinMode(A0, OUTPUT);    // X-axis FWD
-    pinMode(A1, OUTPUT);    // X-axis REV
-    pinMode(A2, INPUT);     // X-axis optical rotary encoder
-    _current_rotary_probe = digitalRead(A2);   // read current value of rotary encoder
-    
-    _stepper_Z.setSpeed(100);
+    _mode_absolute = 1;
+
+    pinMode(X_SERVO_PIN, OUTPUT);
+    pinMode(Z_SERVO_PIN, OUTPUT);
+
+    pinMode(LED_BUSY, OUTPUT);
+    pinMode(LED_IDLE, OUTPUT);
+    digitalWrite(LED_BUSY, HIGH);
+    digitalWrite(LED_IDLE, LOW);
+
     _stepper_Y.setSpeed(100);
 
-    Spark.function("gcode", parse_gcode);
-    Spark.function("adjust_pen", adjust_pen);
+    Particle.function("gcode", parse_gcode);
+    Particle.function("adjustPen", adjust_pen);
+    Particle.function("adjustAxis", adjust_axis);
 }
 
 void loop() { /* ... waiting ... waiting ... waiting ... */ }
@@ -225,12 +353,12 @@ void loop() { /* ... waiting ... waiting ... waiting ... */ }
 /**
 * This file is part of pen-plotter by depletionmode.
 *
-* GcodeCNCDemo is free software: you can redistribute it and/or modify
+* pen-plotter is free software: you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
 * the Free Software Foundation, either version 3 of the License, or
 * (at your option) any later version.
 *
-* GcodeCNCDemo is distributed in the hope that it will be useful,
+* pen-plotter is distributed in the hope that it will be useful,
 * but WITHOUT ANY WARRANTY; without even the implied warranty of
 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 * GNU General Public License for more details.
@@ -238,4 +366,3 @@ void loop() { /* ... waiting ... waiting ... waiting ... */ }
 * You should have received a copy of the GNU General Public License
 * along with pen-plotter. If not, see <http://www.gnu.org/licenses/>.
 */
-
